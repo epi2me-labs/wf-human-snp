@@ -14,7 +14,6 @@ RUN \
     && rm -rf $CONDA_DIR/include \
     && rm -rf $CONDA_DIR/lib/python3.*/site-packages/pip \
     && find $CONDA_DIR -name '__pycache__' -type d -exec rm -rf '{}' '+'
-COPY haplotag.py $CONDA_DIR/lib/python3.6/site-packages/whatshap/cli/haplotag.py
 
 USER $WF_UID
 WORKDIR $HOME

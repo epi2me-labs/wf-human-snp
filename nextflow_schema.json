@@ -89,12 +89,12 @@
                 },
                 "snp_min_af": {
                     "type": "number",
-                    "default": 0.0,
+                    "default": 0.08,
                     "description": "Minimum SNP AF required for a candidate variant."
                 },
                 "indel_min_af": {
                     "type": "number",
-                    "default": 0.0,
+                    "default": 0.15,
                     "description": "Minimum Indel AF required for a candidate variant."
                 },
                 "vcf_fn": {
@@ -107,31 +107,31 @@
                     "type": "boolean",
                     "default": false,
                     "description": "Phase output VCF."
-               },
+                },
                 "use_longphase": {
                     "type": "boolean",
-                    "default": false,
-                    "description": "Use longphase for final phasing of output variants. (experimental)."
-                },
-                "parallel_phase": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Run intermediate phasing in parallel chunks."
-                },
-                "phase_chunk": {
-                    "type": "integer",
-                    "default": 25000000,
-                    "description": "Target size of phasing chunks."
-                },
-                "phase_chunk_min": {
-                    "type": "integer",
-                    "default": 10000000,
-                    "description": "Minimum allowed phasing chunk size."
+                    "default": true,
+                    "description": "Use longphase for final phasing of output variants (experimental)."
                 },
                 "use_longphase_intermediate": {
                     "type": "boolean",
-                    "default": false,
-                    "description": "Use longphase for intermediate phasing. Cannot be combined with `--parallel_phase` (experimental)."
+                    "default": true,
+                    "description": "Use longphase for intermediate phasing."
+                },
+                "min_cov": {
+                    "type": "number",
+                    "default": 2.0,
+                    "description": "Minimum coverage required to call a variant (experimental)."
+                },
+                "min_mq": {
+                    "type": "number",
+                    "default": 5.0,
+                    "description": "Reads with mapping quality < min_mq are filtered (experimental)."
+                },
+                "min_contig_size": {
+                    "type": "number",
+                    "default": 0,
+                    "description": "Contigs with contig size < min_contig_size are filtered (experimental)."
                 }
             }
         },
@@ -167,7 +167,6 @@
                     "default": false,
                     "description": "Enable to prevent sending a workflow ping."
                 }
-
             }
         },
         "generic_options": {
@@ -222,7 +221,7 @@
         },
         "wfversion": {
             "type": "string",
-            "default": "v0.2.1",
+            "default": "v0.3.0",
             "hidden": true
         },
         "monochrome_logs": {
@@ -235,5 +234,9 @@
         "show_hidden_params": {
             "type": "boolean"
         }
+    },
+    "docs": {
+        "intro": "## Introduction\n\nThis workflow uses [Clair3](https://www.github.com/HKU-BAL/Clair3) for calling small\nvariants from long reads. Clair3 makes the best of two methods: pileup (for fast\ncalling of variant candidates in high confidence regions), and full-alignment\n(to improve precision of calls of more complex candidates).\n\nThe workflow will output a gzipped [VCF](https://en.wikipedia.org/wiki/Variant_Call_Format)\nfile containing small variants found in the dataset.\n\n\n",
+        "links": "## Useful links\n\n* [nextflow](https://www.nextflow.io/)\n* [docker](https://www.docker.com/products/docker-desktop)\n* [conda](https://docs.conda.io/en/latest/miniconda.html)\n"
     }
 }
