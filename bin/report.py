@@ -4,7 +4,7 @@
 import argparse
 
 from aplanat import annot, hist, report
-from aplanat.components import bcfstats
+from aplanat.components import bcfstats, depthcoverage
 from aplanat.components import simple as scomponents
 from aplanat.report import WFReport
 from aplanat.util import Colors
@@ -50,13 +50,26 @@ def plot_qc_stats(read_stats):
     return gridplot([[length_hist, q_hist]])
 
 
+def depth_plot_section(read_depth, section):
+    """Add read depth plots to a given section."""
+    rd_plot = depthcoverage.cumulative_depth_from_dist(read_depth)
+    section.markdown("""
+### Genome coverage
+This section displays basic metrics relating to genome coverage.
+""")
+    section.plot(gridplot(
+        [rd_plot],
+        ncols=2)
+    )
+
+
 def main():
     """Run the entry point."""
     parser = argparse.ArgumentParser()
     parser.add_argument("report", help="Report output file")
     parser.add_argument(
         "--read_stats", default='unknown',
-        help="git commit of the executed workflow")
+        help="read statistics output from bamstats")
     parser.add_argument(
         "--versions", required=True,
         help="directory containing CSVs containing name,version.")
@@ -72,6 +85,9 @@ def main():
     parser.add_argument(
         "--vcf_stats", default='unknown',
         help="final vcf stats file")
+    parser.add_argument(
+        "--read_depth", default="unknown",
+        help="read coverage output from mosdepth")
     args = parser.parse_args()
     report_doc = report.HTMLReport(
         "Haploid variant calling Summary Report",
@@ -90,6 +106,10 @@ This section displays basic QC metrics indicating read data quality.
     # canned VCF stats report component
     section = report_doc.add_section()
     bcfstats.full_report(args.vcf_stats, report=section)
+
+    if args.read_depth:
+        section = report_doc.add_section()
+        depth_plot_section(args.read_depth, section)
 
     report_doc.add_section(
         section=scomponents.version_table(args.versions))

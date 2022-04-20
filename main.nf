@@ -40,7 +40,8 @@ process make_chunks {
             --var_pct_full ${params.var_pct_full} \
             --ref_pct_full ${params.ref_pct_full} \
             --snp_min_af ${params.snp_min_af} \
-            --indel_min_af ${params.indel_min_af}
+            --indel_min_af ${params.indel_min_af} \
+            --min_contig_size ${params.min_contig_size}
         """
 }
 
@@ -48,7 +49,7 @@ process make_chunks {
 process pileup_variants {
     // Calls variants per region ("chunk") using pileup network.
     label "clair3"
-    cpus 2
+    cpus 1
     errorStrategy 'retry'
     maxRetries params.call_retries
     input:
@@ -63,11 +64,9 @@ process pileup_variants {
     shell:
         // note: the VCF output here is required to use the contig
         //       name since that's parsed in the SortVcf step
-        // Set TF threads to 1, default is 4 but less than 100%
-        // observed in tests.
+        // note: snp_min_af and indel_min_af have an impact on performance
         '''
-        python $(which clair3.py) CallVarBam \
-            --tensorflow_threads 1 \
+        python $(which clair3.py) CallVariantsFromCffi \
             --chkpnt_fn !{model}/pileup \
             --bam_fn !{bam} \
             --call_fn pileup_!{region.contig}_!{region.chunk_id}.vcf \
@@ -79,6 +78,8 @@ process pileup_variants {
             --fast_mode False \
             --snp_min_af !{params.snp_min_af} \
             --indel_min_af !{params.indel_min_af} \
+            --minMQ !{params.min_mq} \
+            --minCoverage !{params.min_cov} \
             --call_snp_only False \
             --gvcf !{params.GVCF} \
             --temp_file_dir gvcf_tmp_path \
@@ -147,14 +148,18 @@ process select_het_snps {
 }
 
 
-process haplotag_contig {
+process phase_contig {
     // Tags reads in an input BAM from heterozygous SNPs
+    // The haplotag step was removed in clair-v0.1.11 so this step re-emits
+    //   the original BAM and BAI as phased_bam for compatability,
+    //   but adds the VCF as it is now tagged with phasing information
+    //   used later in the full-alignment model
     label "clair3"
     cpus 4
     input:
         tuple val(contig), path(het_snps), path(het_snps_tbi), path(bam), path(bai), path(ref), path(fai)
     output:
-        tuple val(contig), path("${contig}_hp.bam"), path("${contig}_hp.bam.bai"), emit: phased_bam
+        tuple val(contig), path(bam), path(bai), path("phased_${contig}.vcf.gz"), emit: phased_bam_and_vcf
     shell:
         '''
         if [[ "!{params.use_longphase_intermediate}" == "true" ]]; then
@@ -177,171 +182,7 @@ process haplotag_contig {
         fi
 
         tabix -f -p vcf phased_!{contig}.vcf.gz
-
-        whatshap haplotag \
-            --reference !{ref} \
-            --ignore-read-groups \
-            --regions !{contig} \
-            phased_!{contig}.vcf.gz \
-            !{bam} \
-        | samtools view -b -1 -@3 -o !{contig}_hp.bam
-
-        # --write-index produces .csi not .bai, which downstream things seem not to like
-        samtools index -@!{task.cpus} !{contig}_hp.bam
         '''
-}
-
-
-process phase_region_hets {
-    label "clair3"
-    cpus 1
-    input:
-        tuple val(contig), path(het_snps), path(het_snps_tbi), path(bam), path(bai), path(ref), path(fai)
-        val(region)
-    output:
-        tuple val(contig), path("phased_${region.replace(':','-')}.vcf.gz"), emit: region_vcf
-    shell:
-        '''
-        bcftools view !{het_snps} -r !{region} | bgzip -c > region_hets.vcf.gz
-        tabix region_hets.vcf.gz
-
-        # if VCF is empty, whatshap doesn't write a file
-        whatshap phase \
-            --output phased_!{region.replace(":","-")}.vcf.gz \
-            --reference !{ref} \
-            --chromosome !{contig} \
-            --distrust-genotypes \
-            --ignore-read-groups \
-            region_hets.vcf.gz \
-            !{bam}
-        '''
-}
-
-
-process haplotag_phase_regions {
-    label "clair3"
-    cpus 4
-    input:
-        tuple val(contig), path(bam), path(bai), path(ref), path(fai), path("vcfs/*")
-    output:
-        tuple val(contig), path("${contig}_hp.bam"), path("${contig}_hp.bam.bai"), emit: phased_bam
-    shell:
-        '''
-        # Run a python program to join VCFs
-        bcftools concat vcfs/* | bcftools sort | bgzip -@ !{tasks.cpus} -c > phased_!{contig}.vcf.gz
-        tabix -f -p vcf phased_!{contig}.vcf.gz
-
-        whatshap haplotag \
-            --reference !{ref} \
-            --ignore-read-groups \
-            --regions !{contig} \
-            phased_!{contig}.vcf.gz \
-            !{bam} \
-        | samtools view -b -1 -@3 -o !{contig}_hp.bam
-
-        # --write-index produces .csi not .bai, which downstream things seem not to like
-        samtools index -@!{task.cpus} !{contig}_hp.bam
-        '''
-}
-
-
-process get_contig_chunks {
-    label "clair3"
-    cpus 1
-    input:
-        val(contig)
-        path("fasta_index.fai")
-        val(chunk_size)
-        val(min_chunk_size)
-    output:
-        path("regions.bed")
-    shell:
-        '''
-        #!/usr/bin/env python
-        import math
-
-        contig = "!{contig}"
-        chunk_size = !{chunk_size}
-        min_chunk_size = !{min_chunk_size}
-
-        def make_chunks(size):
-            # don't let last chunk become too small
-            chunks = math.ceil(size / chunk_size)
-            remain = size % chunk_size
-            if remain < min_chunk_size:
-                chunks -= 1
-            chsize = math.ceil(size / chunks)
-            start = 0
-            while start < size:
-                end = min(start + chsize, size)
-                yield start, end
-                start = end
-
-        chr_length = None
-        with open("fasta_index.fai") as fh:
-            for line in fh.readlines():
-                chr, length, *_ = line.split()
-                if chr == contig:
-                    chr_length = int(length)
-                    break
-
-        with open("regions.bed", "w") as out:
-            for start, end in make_chunks(chr_length): 
-                out.write(f"{chr}:{start}-{end}\\n")
-        '''
-}
-
-
-workflow sharded_haplotag {
-    take:
-        phase_inputs
-    main:
-        phase_inputs.multiMap {
-            it ->
-                contig: it[0]
-                fai: it[6]
-        }.set { chunks }
-        res = get_contig_chunks(
-			chunks.contig, chunks.fai,
-			params.phase_chunk, params.phase_chunk_min)
-        regions = res.splitText() {
-            chr = (it =~ /(.+):/)[0]
-            [chr[1], it.trim()] }
-        // make an auxiliary channel counting the number of regions per-chromosome
-        reg_counts = regions
-            .groupTuple()
-            .map {chr, regs -> tuple(chr, groupKey(chr, regs.size())) }
-       
-        // create inputs to phase sub-contig regions
-        phase_inputs
-            .map { [it[0], it] }  // add contig key
-            .cross(regions)       // duplicate inputs across regions
-            .multiMap { it -> 
-                phase_inputs: it[0][1]
-                region: it[1][1]
-            }.set { region_inputs }
-        region_vcfs = phase_region_hets(region_inputs.phase_inputs, region_inputs.region)
-        
-        // collect region VCFs by chrom and join to phase_inputs
-        // we first join on chr, and then group by the groupKey
-        // with knowledge of the sizes so big onward tasks for
-        // different chroms don't wait for all region_vcf tasks.
-        reg_counts
-            .cross(phase_region_hets.out.region_vcf)  // cross is performed using chr
-            .map { i, j -> [i[1], i[0], j[1]] }  // i[1] is *chr
-            .groupTuple()                        // uses *chr as key
-            .map { i, j, k -> [j[0], k]}         // dispense with *chr, only need one chr!
-            .set { vcfs_by_chrom }
-        stuff = phase_inputs
-            .map { [it[0], it] }  // add join key
-            .join(vcfs_by_chrom)  // join
-            .map {                // pull out the bits we need
-                // chrom, bam, bai, ref, fai, vcfs
-                [it[0], it[1][3], it[1][4], it[1][5], it[1][6], it[2]]
-            }
-        output = haplotag_phase_regions(stuff)
-    emit:
-        output
 }
 
 
@@ -408,12 +249,13 @@ process create_candidates {
 
 process evaluate_candidates {
     // Run "full alignment" network for variants in a candidate bed file.
+    // phased_bam just references the input BAM as it no longer contains phase information.
     label "clair3"
-    cpus 2
+    cpus 1
     errorStrategy 'retry'
     maxRetries params.call_retries
     input:
-        tuple val(contig), path(phased_bam), path(phased_bam_index)
+        tuple val(contig), path(phased_bam), path(phased_bam_index), path(phased_vcf)
         tuple val(contig), path(candidate_bed)
         tuple path(ref), path(fai)
         path(model)
@@ -424,8 +266,7 @@ process evaluate_candidates {
         """
         mkdir output
         echo "[INFO] 6/7 Call low-quality variants using full-alignment model"
-        python \$(which clair3.py) CallVarBam \
-            --tensorflow_threads 1 \
+        python \$(which clair3.py) CallVariantsFromCffi \
             --chkpnt_fn $model/full_alignment \
             --bam_fn $phased_bam \
             --call_fn output/full_alignment_${filename}.vcf \
@@ -434,11 +275,13 @@ process evaluate_candidates {
             --full_aln_regions ${candidate_bed} \
             --ctgName ${contig} \
             --add_indel_length \
-            --phasing_info_in_bam \
             --gvcf ${params.GVCF} \
+            --minMQ ${params.min_mq} \
+            --minCoverage ${params.min_cov} \
             --snp_min_af ${params.snp_min_af} \
             --indel_min_af ${params.indel_min_af} \
-            --platform ont
+            --platform ont \
+            --phased_vcf_fn ${phased_vcf}
         """
 }
 
@@ -522,7 +365,7 @@ process merge_pileup_and_full_vars{
 }
 
 
-process phase_contig {
+process post_clair_phase_contig {
     // Phase VCF for a contig
     label "clair3"
     cpus 4
@@ -658,7 +501,7 @@ process readStats {
         path "readstats.txt", emit: stats
     """
     # using multithreading inside docker container does strange things
-    bamstats --threads 1 alignments.bam > readstats.txt
+    bamstats --threads 2 alignments.bam > readstats.txt
     """
 }
 
@@ -701,10 +544,35 @@ process vcfStats {
 }
 
 
+process mosdepth {
+    label "clair3"
+    cpus 2
+    input:
+        tuple path(bam), path(bai)
+        file target_bed
+    output:
+        path "*.regions.bed.gz", emit: mosdepth_bed
+        path "*.global.dist.txt", emit: mosdepth_dist
+    script:
+        def name = bam.simpleName
+        """
+        export MOSDEPTH_PRECISION=3
+        mosdepth \
+        -x \
+        -t $task.cpus \
+        -b $target_bed \
+        --no-per-base \
+        $name \
+        $bam
+        """
+}
+
+
 process makeReport {
     label "clair3"
     input:
         file read_summary
+        file read_depth
         file vcfstats
         path versions
         path "params.json"
@@ -712,10 +580,20 @@ process makeReport {
         path "wf-human-snp-*.html"
     script:
         report_name = "wf-human-snp-" + params.report_name + '.html'
+        wfversion = params.wfversion
+        if( workflow.commitId ){
+            wfversion = workflow.commitId
+        }
         """
-        report.py $report_name --versions $versions --params params.json \
+        report.py \
+        $report_name \
+        --versions $versions \
+        --params params.json \
         --read_stats $read_summary \
-        --vcf_stats $vcfstats
+        --read_depth $read_depth \
+        --vcf_stats $vcfstats \
+        --revision $wfversion \
+        --commit $workflow.commitId
         """
 }
 
@@ -754,17 +632,13 @@ workflow clair3 {
             aggregate_pileup_variants.out.pileup_vcf,
             aggregate_pileup_variants.out.phase_qual)
 
-        // Perform whatshap phasing for each contig.  
+        // Perform phasing for each contig.
         // `each` doesn't work with tuples, so we have to make the product ourselves
         phase_inputs = select_het_snps.out.het_snps_vcf
             .combine(bam).combine(ref)
-        // > Step 3 + Step 4
-        if (params.parallel_phase) {
-            sharded_haplotag(phase_inputs).set { phased_bam }
-        } else {
-            haplotag_contig(phase_inputs)
-            haplotag_contig.out.phased_bam.set { phased_bam }
-        }
+        // > Step 3 (Step 4 haplotag step removed in clair3 v0.1.11)
+        phase_contig(phase_inputs)
+        phase_contig.out.phased_bam_and_vcf.set { phased_bam_and_vcf }
 
         // Find quality filter to select variants for "full alignment"
         // processing, then generate bed files containing the candidates.
@@ -786,8 +660,8 @@ workflow clair3 {
                 y = x[1]; if(! (y instanceof java.util.ArrayList)){y = [y]}
                 // effectively duplicate chr for all beds - [chr, bed]
                 y.collect { [x[0], it] } }
-        // produce something emitting: [[chr, bam, bai], [chr20, bed], [ref, fai], model]
-        bams_beds_and_stuff = phased_bam
+        // produce something emitting: [[chr, bam, bai, vcf], [chr20, bed], [ref, fai], model]
+        bams_beds_and_stuff = phased_bam_and_vcf
             .cross(candidate_beds)
             .combine(ref.map {it->[it]})
             .combine(model)
@@ -839,7 +713,7 @@ workflow clair3 {
         if (params.phase_vcf) {
             data = merge_pileup_and_full_vars.out.merged_vcf
                 .combine(bam).combine(ref).view()
-            phase_contig(data)
+            post_clair_phase_contig(data)
                 .map { it -> [it[1]] }
                 .set { final_vcfs }
         } else {
@@ -863,8 +737,9 @@ workflow clair3 {
         software_versions = getVersions()
         workflow_params = getParams()
         vcf_stats = vcfStats(clair_final)
+        read_depth = mosdepth(bam, bed)
         report = makeReport(
-            read_stats.stats, vcf_stats[0],
+            read_stats.stats, mosdepth.out.mosdepth_dist, vcf_stats[0],
             software_versions.collect(), workflow_params)
         telemetry = workflow_params
 
@@ -890,10 +765,6 @@ workflow happy_evaluation {
 // entrypoint workflow
 WorkflowMain.initialise(workflow, params, log)
 workflow {
-    if (workflow.profile == "conda") {
-        println("The 'conda' profile is not supported by this workflow.")
-        exit 1
-    }
 
     start_ping()
     // TODO: why do we need a fai? is this a race condition on

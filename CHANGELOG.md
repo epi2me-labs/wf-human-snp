@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.3.0]
+### Changed
+- Update clair3 to v0.1.11 for performance improvements
+  - --parallel_phase and related options have been removed as intermediate
+    phasing no longer needs to be completed in chunks
+- longphase is now the default option for intermediate and post-call phasing
+- Re-enabled conda profile
+- Bumped Aplanat for newer report theme
+### Added
+- Cumulative read coverage plot added to report
+
 ## [v0.2.1]
 ### Fixed
 - Post-call phasing led to mangled VCF.

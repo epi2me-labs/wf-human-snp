@@ -1,9 +1,17 @@
 # Diploid small variant calling workflow
 
 This repository contains a [nextflow](https://www.nextflow.io/) workflow
-performing diploid variant calling of whole genome data with
-[Clair3](https://www.github.com/HKU-BAL/Clair3) starting from read to
-reference alignments.
+for performing diploid variant calling of whole genome data.
+
+## Introduction
+
+This workflow uses [Clair3](https://www.github.com/HKU-BAL/Clair3) for calling small
+variants from long reads. Clair3 makes the best of two methods: pileup (for fast
+calling of variant candidates in high confidence regions), and full-alignment
+(to improve precision of calls of more complex candidates).
+
+The workflow will output a gzipped [VCF](https://en.wikipedia.org/wiki/Variant_Call_Format)
+file containing small variants found in the dataset.
 
 
 ## Quickstart
@@ -65,8 +73,6 @@ The primary outputs of the workflow include:
 
 * a gzipped [VCF](https://en.wikipedia.org/wiki/Variant_Call_Format) file containing small variants found in the dataset.
 * an HTML report document detailing the primary findings of the workflow.
-
-
 ## Useful links
 
 * [nextflow](https://www.nextflow.io/)
