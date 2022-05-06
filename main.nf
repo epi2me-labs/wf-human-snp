@@ -551,16 +551,16 @@ process mosdepth {
         tuple path(bam), path(bai)
         file target_bed
     output:
-        path "*.regions.bed.gz", emit: mosdepth_bed
         path "*.global.dist.txt", emit: mosdepth_dist
     script:
         def name = bam.simpleName
+        def bedargs = target_bed.name != 'OPTIONAL_FILE' ? "-b ${target_bed}" : ''
         """
         export MOSDEPTH_PRECISION=3
         mosdepth \
         -x \
         -t $task.cpus \
-        -b $target_bed \
+        ${bedargs} \
         --no-per-base \
         $name \
         $bam
