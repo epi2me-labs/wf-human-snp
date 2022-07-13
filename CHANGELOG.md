@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [v0.3.2]
 ### Changed
 - Improved `--help` command
+- Improved robustness of `fastq_ingress` utility
+- Rebuild docker container to include `longphase` v1.2
+### Fixed
+- Set `out_dir` option format to ensure output is written to correct directory on Windows
 
 ## [v0.3.1]
 ### Fixed
