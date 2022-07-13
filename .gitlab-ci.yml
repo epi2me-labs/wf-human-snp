@@ -6,5 +6,6 @@ include:
 variables:
     NF_BEFORE_SCRIPT: |
         wget -O demo_data.tar.gz https://ont-exd-int-s3-euwst1-epi2me-labs.s3.amazonaws.com/wf-human-snp/demo_data.tar.gz && tar -xzvf  demo_data.tar.gz
-    NF_WORKFLOW_OPTS: "--bam demo_data/chr6_chr20.bam --bed demo_data/chr6_chr20.bed --ref demo_data/chr6_chr20.fasta --model demo_data/ont_r104_e81_sup_g5015"
+    NF_WORKFLOW_OPTS: "--bam demo_data/chr6_chr20.bam --bed demo_data/chr6_chr20.bed --ref demo_data/chr6_chr20.fasta --model demo_data/ont_r104_e81_sup_g5015 --phase_vcf"
+    NF_IGNORE_PROCESSES: "hap"
 
