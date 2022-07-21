@@ -84,7 +84,7 @@ process pileup_variants {
             --gvcf !{params.GVCF} \
             --temp_file_dir gvcf_tmp_path \
             --pileup
-        ''' 
+        '''
 }
 
 
@@ -164,7 +164,7 @@ process phase_contig {
         '''
         if [[ "!{params.use_longphase_intermediate}" == "true" ]]; then
             echo "Using longphase for phasing"
-            # longphase needs decompressed 
+            # longphase needs decompressed
             bgzip -@ !{task.cpus} -dc !{het_snps} > snps.vcf
             longphase phase --ont -o phased_!{contig} \
                 -s snps.vcf -b !{bam} -r !{ref} -t !{task.cpus}
@@ -204,7 +204,7 @@ process get_qual_filter {
                 --output_fn output \
                 --var_pct_full !{params.var_pct_full} \
                 --ref_pct_full !{params.ref_pct_full} \
-                --platform ont 
+                --platform ont
         '''
 }
 
@@ -377,7 +377,7 @@ process post_clair_phase_contig {
         '''
         if [[ "!{params.use_longphase}" == "true" ]]; then
             echo "Using longphase for phasing"
-            # longphase needs decompressed 
+            # longphase needs decompressed
             gzip -dc !{vcf} > variants.vcf
             longphase phase --ont -o phased_!{contig} \
                 -s variants.vcf -b !{bam} -r !{ref} -t !{task.cpus}
@@ -613,13 +613,13 @@ workflow clair3 {
         // > Step 0
         make_chunks(bam, ref, bed)
         chunks = make_chunks.out.chunks_file
-            .splitText(){ 
+            .splitText(){
                 cols = (it =~ /(.+)\s(.+)\s(.+)/)[0]
                 ["contig": cols[1], "chunk_id":cols[2], "total_chunks":cols[3]]}
         contigs = make_chunks.out.contigs_file.splitText() { it.trim() }
-        
+
         // Run the "pileup" caller on all chunks and collate results
-        // > Step 1 
+        // > Step 1
         pileup_variants(chunks, bam, ref, model)
         aggregate_pileup_variants(
             ref, pileup_variants.out.pileup_vcf_chunks.collect(),
@@ -645,13 +645,13 @@ workflow clair3 {
         // > Step 5
         get_qual_filter(aggregate_pileup_variants.out.pileup_vcf)
         create_candidates(
-            contigs, ref, 
+            contigs, ref,
             aggregate_pileup_variants.out.pileup_vcf,
             get_qual_filter.out.full_qual)
 
         // Run the "full alignment" network on candidates. Have to go through a
         // bit of a song and dance here to generate our input channels here
-        // with various things duplicated (again because of limitations on 
+        // with various things duplicated (again because of limitations on
         // `each` and tuples).
         // > Step 6
         candidate_beds = create_candidates.out.candidate_bed.flatMap {
@@ -747,8 +747,8 @@ workflow clair3 {
         clair_final.concat(report)
         telemetry
 }
-    
-   
+
+
 workflow happy_evaluation {
     take:
         clair_vcf
